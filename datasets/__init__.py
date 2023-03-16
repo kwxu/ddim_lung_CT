@@ -7,6 +7,7 @@ from torchvision.datasets import CIFAR10
 from datasets.celeba import CelebA
 from datasets.ffhq import FFHQ
 from datasets.lsun import LSUN
+from datasets.lung_ct import ChestDataLoader
 from torch.utils.data import Subset
 import numpy as np
 
@@ -175,6 +176,10 @@ def get_dataset(args, config):
         )
         test_dataset = Subset(dataset, test_indices)
         dataset = Subset(dataset, train_indices)
+    elif config.data.dataset == "lung_CT":
+        lung_ct_config = config.lung_ct_config
+        dataset = ChestDataLoader(lung_ct_config)
+        test_dataset = None
     else:
         dataset, test_dataset = None, None
 
