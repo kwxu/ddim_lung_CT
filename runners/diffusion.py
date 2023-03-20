@@ -17,6 +17,10 @@ from functions.ckpt_util import get_ckpt_path
 
 import torchvision.utils as tvu
 
+from matplotlib import colors
+import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
+
 
 def torch2hwcuint8(x, clip=False):
     if clip:
@@ -193,7 +197,8 @@ class Diffusion(object):
         model = Model(self.config)
 
         if not self.args.use_pretrained:
-            if getattr(self.config.sampling, "ckpt_id", None) is None:
+            # if getattr(self.config.sampling, "ckpt_id", None) is None:
+            if self.args.ckpt_id is None:
                 states = torch.load(
                     os.path.join(self.args.log_path, "ckpt.pth"),
                     map_location=self.config.device,
@@ -201,7 +206,7 @@ class Diffusion(object):
             else:
                 states = torch.load(
                     os.path.join(
-                        self.args.log_path, f"ckpt_{self.config.sampling.ckpt_id}.pth"
+                        self.args.log_path, f"ckpt_{self.args.ckpt_id}.pth"
                     ),
                     map_location=self.config.device,
                 )
@@ -238,8 +243,44 @@ class Diffusion(object):
             self.sample_interpolation(model)
         elif self.args.sequence:
             self.sample_sequence(model)
+        elif self.args.sequence_grid_plot:
+            self.sample_sequence_grid_plot(model)
+        elif self.args.sample_grid_plot:
+            self.sample_grid_plot(model)
         else:
             raise NotImplementedError("Sample procedeure not defined")
+
+    def forward_plot(self):
+        config = self.config
+        args = self.args
+        dataset, test_dataset = get_dataset(args, config)
+        train_loader = data.DataLoader(
+            dataset,
+            batch_size=1,
+            shuffle=True,
+            num_workers=config.data.num_workers,
+        )
+
+        n_sample = 10
+        out_png_dir = os.path.join(args.exp, "image_samples", f'forward_sampling')
+        print(f'Save to {out_png_dir}')
+        os.makedirs(out_png_dir, exist_ok=True)
+        for sample_idx, (x, y) in tqdm.tqdm(enumerate(train_loader), total=n_sample):
+            if sample_idx >= n_sample:
+                break
+
+            x = data_transform(self.config, x)
+            b = self.betas.cpu()
+            for t in range(0, self.num_timesteps, 100):
+                e = torch.randn_like(x)
+                t = torch.tensor([t])
+                a = (1 - b).cumprod(dim=0).index_select(0, t).view(-1, 1, 1, 1)
+                x = x * a.sqrt() + e * (1.0 - a).sqrt()
+                x = inverse_data_transform(config, x)
+                out_png = os.path.join(out_png_dir, f'{sample_idx}_{t[0]}.png')
+                tvu.save_image(
+                    x[0], out_png
+                )
 
     def sample_fid(self, model):
         config = self.config
@@ -274,6 +315,9 @@ class Diffusion(object):
     def sample_sequence(self, model):
         config = self.config
 
+        out_png_dir = os.path.join(self.args.image_folder, f'sequence')
+        os.makedirs(out_png_dir, exist_ok=True)
+
         x = torch.randn(
             8,
             config.data.channels,
@@ -290,9 +334,138 @@ class Diffusion(object):
 
         for i in range(len(x)):
             for j in range(x[i].size(0)):
+                png_file_name = os.path.join(out_png_dir, f"{j}_{i}.png")
+                print(f'Save to {png_file_name}')
                 tvu.save_image(
-                    x[i][j], os.path.join(self.args.image_folder, f"{j}_{i}.png")
+                    # x[i][j], os.path.join(self.args.image_folder, f"{j}_{i}.png")
+                    x[i][j], png_file_name
                 )
+
+    def sample_sequence_grid_plot(self, model):
+        config = self.config
+
+        out_png_dir = os.path.join(self.args.image_folder, f'sequence_grid_plot')
+        os.makedirs(out_png_dir, exist_ok=True)
+        print(f'Save png files to {out_png_dir}')
+
+        n_sample = 10
+
+        # Let's assume we run with 1000 steps DDIM.
+        show_grid_idx = [
+            [0, 1, 10, 20, 50],
+            [100, 200, 300, 400, 500],
+            [600, 700, 800, 900, 1000]
+        ]
+
+        for sample_idx in tqdm.tqdm(range(n_sample), total=n_sample):
+            x = torch.randn(
+                1,
+                config.data.channels,
+                config.data.image_size,
+                config.data.image_size,
+                device=self.device,
+            )
+            with torch.no_grad():
+                _, x_pred_sequence = self.sample_image(x, model, last=False)
+
+            # x_pred_sequence = torch.randn(
+            #     1000,
+            #     1,
+            #     config.data.channels,
+            #     config.data.image_size,
+            #     config.data.image_size,
+            #     device=self.device
+            # )
+
+            show_img_grid = []
+            for row_idx in show_grid_idx:
+                show_img_row = []
+                for idx in row_idx:
+                    show_img = x_pred_sequence[idx - 1][0] if idx > 0 else x[0]
+                    show_img = inverse_data_transform(config, show_img)
+                    show_img = show_img.cpu().numpy()
+                    show_img_row.append(show_img)
+                show_img_grid.append(show_img_row)
+
+            fig = plt.figure(constrained_layout=False)
+            gs = fig.add_gridspec(nrows=3, ncols=5, wspace=0.01, hspace=0.01)
+
+            for ax_row_idx, show_row_idx_list in enumerate(show_grid_idx):
+                for ax_col_idx, show_idx in enumerate(show_row_idx_list):
+                    img_ax = fig.add_subplot(gs[ax_row_idx, ax_col_idx])
+                    img_ax.set_axis_off()
+                    img_ax.imshow(
+                        show_img_grid[ax_row_idx][ax_col_idx][0],
+                        interpolation=None,
+                        cmap='gray',
+                        norm=colors.Normalize(vmin=0, vmax=1)
+                    )
+                    img_ax.annotate(
+                        f'Iter: {show_idx}',
+                        xy=(.95, .05),
+                        horizontalalignment='right',
+                        verticalalignment='bottom',
+                        xycoords='axes fraction',
+                        color='yellow',
+                        fontsize=5
+                    )
+
+            out_png = os.path.join(out_png_dir, f'{sample_idx}.png')
+            # print(f'\nSave to {out_png}\n')
+            plt.savefig(out_png, bbox_inches='tight', pad_inches=0.1, dpi=300)
+
+    def sample_grid_plot(self, model):
+        config = self.config
+        out_png_dir = self.args.image_folder
+        os.makedirs(out_png_dir, exist_ok=True)
+
+        n_row = 3
+        n_col = 5
+        n_sample = n_row * n_col
+
+        p_bar = tqdm.tqdm(range(n_sample), total=n_sample)
+
+        show_img_grid = []
+        for row_idx in range(n_row):
+            show_img_row = []
+            for col_idx in range(n_col):
+                x = torch.randn(
+                    1,
+                    config.data.channels,
+                    config.data.image_size,
+                    config.data.image_size,
+                    device=self.device,
+                )
+
+                with torch.no_grad():
+                    x = self.sample_image(x, model)
+
+                x = inverse_data_transform(config, x)
+                x = x.cpu().numpy()
+                show_img_row.append(x[0])
+
+                p_bar.update()
+
+            show_img_grid.append(show_img_row)
+
+        fig = plt.figure(constrained_layout=False)
+        gs = fig.add_gridspec(nrows=3, ncols=5, wspace=0.01, hspace=0.01)
+
+        for ax_row_idx in range(n_row):
+            for ax_col_idx in range(n_col):
+                img_ax = fig.add_subplot(gs[ax_row_idx, ax_col_idx])
+                img_ax.set_axis_off()
+                img_ax.imshow(
+                    show_img_grid[ax_row_idx][ax_col_idx][0],
+                    interpolation=None,
+                    cmap='gray',
+                    norm=colors.Normalize(vmin=0, vmax=1)
+                )
+
+        out_png = os.path.join(out_png_dir, f'{self.args.ckpt_id}.png')
+        print(f'Save to {out_png}')
+        plt.savefig(out_png, bbox_inches='tight', pad_inches=0.1, dpi=300)
+        plt.close()
 
     def sample_interpolation(self, model):
         config = self.config

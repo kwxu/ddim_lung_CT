@@ -41,6 +41,7 @@ def parse_args_and_config():
         help="Verbose level: info | debug | warning | critical",
     )
     parser.add_argument("--test", action="store_true", help="Whether to test the model")
+    parser.add_argument("--forward_plot", action="store_true", help="show the forward procedure")
     parser.add_argument(
         "--sample",
         action="store_true",
@@ -86,6 +87,9 @@ def parse_args_and_config():
         help="eta used to control the variances of sigma",
     )
     parser.add_argument("--sequence", action="store_true")
+    parser.add_argument("--sequence_grid_plot", action="store_true")
+    parser.add_argument("--sample_grid_plot", action="store_true")
+    parser.add_argument("--ckpt_id", default=None)
 
     args = parser.parse_args()
     args.log_path = os.path.join(args.exp, "logs", args.doc)
@@ -174,12 +178,12 @@ def parse_args_and_config():
                         if response.upper() == "Y":
                             overwrite = True
 
-                    if overwrite:
-                        shutil.rmtree(args.image_folder)
-                        os.makedirs(args.image_folder)
-                    else:
-                        print("Output image folder exists. Program halted.")
-                        sys.exit(0)
+                    # if overwrite:
+                    #     shutil.rmtree(args.image_folder)
+                    #     os.makedirs(args.image_folder)
+                    # else:
+                    #     print("Output image folder exists. Program halted.")
+                    #     sys.exit(0)
 
     # add device
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
@@ -220,6 +224,8 @@ def main():
             runner.sample()
         elif args.test:
             runner.test()
+        elif args.forward_plot:
+            runner.forward_plot()
         else:
             runner.train()
     except Exception:
