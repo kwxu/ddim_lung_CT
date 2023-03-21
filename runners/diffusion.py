@@ -20,6 +20,7 @@ import torchvision.utils as tvu
 from matplotlib import colors
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
+from functions.denoising import generalized_steps
 
 
 def torch2hwcuint8(x, clip=False):
@@ -352,9 +353,9 @@ class Diffusion(object):
 
         # Let's assume we run with 1000 steps DDIM.
         show_grid_idx = [
-            [0, 1, 10, 20, 50],
-            [100, 200, 300, 400, 500],
-            [600, 700, 800, 900, 1000]
+            [0, 100, 200, 300, 400],
+            [500, 600, 700, 800, 900],
+            [950, 970, 990, 995, 1000]
         ]
 
         for sample_idx in tqdm.tqdm(range(n_sample), total=n_sample):
@@ -366,7 +367,7 @@ class Diffusion(object):
                 device=self.device,
             )
             with torch.no_grad():
-                _, x_pred_sequence = self.sample_image(x, model, last=False)
+                x_pred_sequence, _ = self.sample_image(x, model, last=False)
 
             # x_pred_sequence = torch.randn(
             #     1000,
@@ -401,7 +402,7 @@ class Diffusion(object):
                         norm=colors.Normalize(vmin=0, vmax=1)
                     )
                     img_ax.annotate(
-                        f'Iter: {show_idx}',
+                        f't = {1000 - show_idx}',
                         xy=(.95, .05),
                         horizontalalignment='right',
                         verticalalignment='bottom',
@@ -556,3 +557,154 @@ class Diffusion(object):
 
     def test(self):
         pass
+
+
+class SampleSpecificUtils:
+    def __init__(self, config, exp_path, log_name, device=None):
+        self.config = config
+        self.exp_path = exp_path
+        self.log_name = log_name
+
+        if device is None:
+            device = (
+                torch.device("cuda")
+                if torch.cuda.is_available()
+                else torch.device("cpu")
+            )
+        self.device = device
+
+        betas = get_beta_schedule(
+            beta_schedule=config.diffusion.beta_schedule,
+            beta_start=config.diffusion.beta_start,
+            beta_end=config.diffusion.beta_end,
+            num_diffusion_timesteps=config.diffusion.num_diffusion_timesteps,
+        )
+        betas = self.betas = torch.from_numpy(betas).float().to(self.device)
+        self.num_timesteps = betas.shape[0]
+
+    def _load_model(self, ckpt_id):
+        model = Model(self.config)
+        ckpt_path = os.path.join(self.exp_path, "logs", self.log_name, f'ckpt_{ckpt_id}.pth')
+        print(f'Load {ckpt_path}')
+        states = torch.load(
+            ckpt_path,
+            map_location=self.device
+        )
+        model = model.to(self.device)
+        model = torch.nn.DataParallel(model)
+        model.load_state_dict(states[0], strict=True)
+
+        return model
+
+    def get_x0_prediction(self, x0, run_ts, show_ts, show_ckpts, out_png_dir):
+        """
+        1. Get the input array (with different noise levels)
+        2. Get the predictions for x0
+
+        x0 should be in range [0, 1]
+        """
+        os.makedirs(out_png_dir, exist_ok=True)
+
+        x0 = data_transform(self.config, x0)
+        x0 = torch.from_numpy(x0).float()
+        b = self.betas.cpu()
+
+        show_img_dict = {}
+
+        num_timesteps = self.num_timesteps
+        # num_timesteps = 5
+
+        xs = []
+        es = []
+        ats = []
+        show_xs = {}
+        # for t in tqdm.tqdm(range(0, num_timesteps), total=num_timesteps, desc='Generate the noisy inputs'):
+        for t in tqdm.tqdm(run_ts, total=len(run_ts), desc='Generate the noisy inputs'):
+            e = torch.randn_like(x0)
+            t = torch.tensor([t])
+            a = (1 - b).cumprod(dim=0).index_select(0, t).view(-1, 1, 1, 1)
+            x = x0 * a.sqrt() + e * (1.0 - a).sqrt()
+            xs.append(x)
+            es.append(e)
+            ats.append(a)
+
+            if t in show_ts:
+                show_xs[t] = inverse_data_transform(self.config, x)
+
+        show_img_dict['input'] = show_xs
+        for t, a in zip(run_ts, ats):
+            a_sqrt = a.sqrt()[0][0]
+            print(f'{int(t)} - {float(a_sqrt):.4f}')
+
+        for ckpt_id in show_ckpts:
+            pred_x0s = []
+            errs = []
+            show_pred_x0s = {}
+            show_pred_diffs = {}
+            model = self._load_model(ckpt_id)
+            model.eval()
+            # for t in tqdm.tqdm(range(0, num_timesteps), total=num_timesteps,
+            #                    desc=f'Inference with ckpt {ckpt_id}'):
+            for t_idx, t in tqdm.tqdm(enumerate(run_ts), total=len(run_ts),
+                               desc=f'Inference with ckpt {ckpt_id}'):
+                with torch.no_grad():
+                    et = model(xs[t_idx].to(self.device), torch.tensor([t]).float().to(self.device))
+                    et = et.to('cpu')
+                    err = (es[t_idx] - et).square().sum(dim=(1, 2, 3)).mean(dim=0)
+                    errs.append(err)
+
+                    at = ats[t_idx]
+                    pred_x0 = (xs[t_idx] - et * (1 - at).sqrt()) / at.sqrt()
+                    pred_x0s.append(pred_x0)
+
+                    if t in show_ts:
+                        show_pred_x0s[t] = inverse_data_transform(self.config, pred_x0)
+                        show_pred_diffs[t] = (pred_x0 - x0).abs() / 2.
+
+            show_img_dict[f'ckpt_{ckpt_id}'] = show_pred_x0s
+            show_img_dict[f'ckpt_{ckpt_id}_diff'] = show_pred_diffs
+
+            err_mean = np.mean(errs)
+            print(err_mean)
+
+        for show_tag, img_dict in show_img_dict.items():
+            for t, img in img_dict.items():
+                t = t + 1
+                t = int(t)
+                png_path = os.path.join(out_png_dir, f'{show_tag}_{t}.png')
+                tvu.save_image(img[0], png_path)
+
+
+    def get_x0_prediction_along_trajectory(self, x0, ts, ckpt_id, out_png_dir):
+        os.makedirs(out_png_dir, exist_ok=True)
+        print(f'Save to {out_png_dir}')
+
+        x0 = data_transform(self.config, x0)
+        x0 = torch.from_numpy(x0).float()
+        b = self.betas.cpu()
+
+        show_pred_x0s = {}
+        show_pred_diffs = {}
+        model = self._load_model(ckpt_id)
+        model.eval()
+
+        e = torch.randn_like(x0)
+        for t_idx in tqdm.tqdm(ts, total=len(ts)):
+            t = torch.tensor([t_idx])
+            a = (1 - b).cumprod(dim=0).index_select(0, t).view(-1, 1, 1, 1)
+            x = x0 * a.sqrt() + e * (1.0 - a).sqrt()
+
+            seq = range(0, t_idx)
+            _, x0_preds = generalized_steps(x.to(self.device), seq, model, self.betas)
+            x0_pred = x0_preds[-1][0]
+            show_pred_x0s[t_idx] = inverse_data_transform(self.config, x0_pred)
+            show_pred_diffs[t_idx] = (x0_pred - x0).abs() / 2.
+
+        for show_tag, img_dict in zip(
+                [f'ckpt_{ckpt_id}', f'ckpt_{ckpt_id}_diff'], [show_pred_x0s, show_pred_diffs]):
+            for t, img in img_dict.items():
+                t = t + 1
+                t = int(t)
+                png_path = os.path.join(out_png_dir, f'{show_tag}_{t}.png')
+                tvu.save_image(img[0], png_path)
+

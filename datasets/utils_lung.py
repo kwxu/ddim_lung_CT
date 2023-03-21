@@ -20,14 +20,21 @@ from scipy.interpolate import interp1d
 from skimage.measure import regionprops
 import random
 import cv2
-from scipy.interpolate import interp1d
 import logging
 from scipy.ndimage import binary_erosion
 from scipy.ndimage import binary_fill_holes
 from scipy.ndimage import binary_dilation
 from skimage.metrics import structural_similarity
-import matplotlib.pyplot as plt
 from matplotlib import colors
+from torch.utils.data import Dataset
+import h5py
+from tqdm import tqdm
+from skimage.transform import resize
+from skimage.morphology import binary_erosion
+from scipy.interpolate import interp1d
+from scipy.ndimage.filters import gaussian_filter
+from skimage.transform import rotate, warp, SimilarityTransform
+from skimage.transform import resize
 
 
 logger = logging.getLogger()
@@ -581,4 +588,425 @@ def save_png_two_stage_combined_stack(img_stack_dict, out_png):
     plt.close()
 
 
+def load_json_config(config_file):
+    f = open(config_file)
+    config = json.load(f)
 
+    default_backbone = 'PConv'
+
+    if 'backbone' not in config['model']:
+        config['model']['backbone'] = default_backbone
+
+    if 'spec_level_subset' not in config['data']:
+        config['data']['spec_level_subset'] = False
+
+    if 'turn_off_vgg_normalizer' not in config['model']:
+        config['model']['turn_off_vgg_normalizer'] = False
+
+    return config
+
+
+class ImageTransformer:
+    def __init__(self, config):
+        self.config = config
+
+    def generate_random_config(self):
+        angle_max = self.config.augmentation.rotation_degree
+        pad_ratio_range = self.config.augmentation.padding_ratio
+        trans_max_ratio_x = self.config.augmentation.trans_ratio_x
+        trans_max_ratio_y = self.config.augmentation.trans_ratio_y
+
+        return {
+                'gaussian_blurry': get_random_apply_flag(self.config.augmentation.gaussian_smooth_p),
+                'random_rotation': random.uniform(-angle_max, angle_max),
+                'pad_ratio': random.uniform(pad_ratio_range[0], pad_ratio_range[1]),
+                'trans_ratio_x': random.uniform(-trans_max_ratio_x, trans_max_ratio_x),
+                'trans_ratio_y': random.uniform(-trans_max_ratio_y, trans_max_ratio_y)}
+
+    def generate_sample(self, slice_img_dict, random_config=None):
+        if random_config is None:
+            random_config = self.generate_random_config()
+
+        ct_image = np.rot90(slice_img_dict['ct'])
+        body_image = np.rot90(slice_img_dict['body_mask'])
+
+        # Crop using the body mask bounding box.
+        ct_image, body_image = self._crop_body_bbox(ct_image, body_image)
+
+        # Random apply the gaussian blurry
+        if random_config['gaussian_blurry']:
+            ct_image = self._apply_gaussian_blurry(ct_image)
+
+        # Normalize the intensity scale.
+        ct_image = self._run_preprocessing(ct_image, body_image)
+        pad_val = self.config.scale_range[0]
+
+        # Random rotation
+        ct_image, body_image = self._apply_random_rot_angle(
+            ct_image, body_image, pad_val, random_config['random_rotation'])
+
+        # Re-cropping with body bbox
+        ct_image, body_image = self._crop_body_bbox(ct_image, body_image)
+
+        # Square padding, determined by random scaling
+        ct_image = self._apply_square_padding(ct_image, pad_val, random_config['pad_ratio'])
+
+        # Random translation
+        ct_image = self._apply_xy_translation(
+            ct_image, pad_val, random_config['trans_ratio_x'], random_config['trans_ratio_y'])
+
+        # Resize the image, log down the scale-ratio here.
+        ori_dim = ct_image.shape[0]
+        resize_dim = self.config.image_size
+        inter_order = self.config.inter_order
+        ct_image = resize(ct_image, (resize_dim, resize_dim), order=inter_order)
+        scale_ratio = ori_dim / resize_dim
+
+        # Reshape the image for torch (C, H, W)
+        ct_image = np.repeat(ct_image[np.newaxis, :, :], self.config.channels, axis=0)
+
+        return ct_image, random_config, scale_ratio
+
+    def apply_random_trans_stack(self, slice_stack, body_stack, random_config, use_body_slice_idx=2):
+        slice_stack = slice_stack.copy()
+        body_stack = body_stack.copy()
+        trans_list = []
+        scale_ratio = None
+        for idx_slice in range(slice_stack.shape[0]):
+            trans_slice, _, scale_ratio = self.generate_sample(
+                {
+                    'ct': slice_stack[idx_slice],
+                    # 'body_mask': body_stack[idx_slice]
+                    'body_mask': body_stack[use_body_slice_idx]
+                }, random_config)
+            trans_list.append(trans_slice)
+
+        return np.stack(trans_list, axis=0), scale_ratio
+
+    def apply_random_trans_to_mask_stack(self, mask_stack, body_stack, random_config, use_body_slice_idx=2):
+        mask_stack = mask_stack.copy()
+        body_stack = body_stack.copy()
+        trans_list = []
+        for idx_slice in range(mask_stack.shape[0]):
+            trans_slice = self.apply_random_trans_to_mask(
+                {
+                    'in_mask': mask_stack[idx_slice],
+                    # 'body_mask': body_stack[idx_slice]
+                    'body_mask': body_stack[use_body_slice_idx]
+                }, random_config)
+            trans_list.append(trans_slice)
+
+        return np.stack(trans_list, axis=0)
+
+    def apply_random_trans_to_mask(self, slice_img_dict, random_config):
+        in_mask_image = np.rot90(slice_img_dict['in_mask'])
+        body_image = np.rot90(slice_img_dict['body_mask'])
+
+        in_mask_image, body_image = self._crop_body_bbox(in_mask_image, body_image)
+        in_mask_image, body_image = self._apply_random_rot_angle(
+            in_mask_image, body_image, 0, random_config['random_rotation'])
+
+        in_mask_image, body_image = self._crop_body_bbox(in_mask_image, body_image)
+        in_mask_image = self._apply_square_padding(in_mask_image, 0, random_config['pad_ratio'])
+
+        in_mask_image = self._apply_xy_translation(
+            in_mask_image, 0, random_config['trans_ratio_x'], random_config['trans_ratio_y'])
+
+        resize_dim = self.config.image_size
+        in_mask_image = resize(in_mask_image, (resize_dim, resize_dim), order=0)
+        in_mask_image = np.repeat(in_mask_image[np.newaxis, :, :], 3, axis=0)
+
+        return in_mask_image
+
+    def _apply_gaussian_blurry(self, ct_image):
+        return gaussian_filter(ct_image, sigma=self.config.augmentation.gaussian_smooth_sigma)
+
+    def _apply_random_rot_angle(self, ct_image, body_image, pad_val, angle_val):
+        inter_order = self.config.inter_order
+        ct_rot = rotate(ct_image, angle_val, resize=True, mode='constant', cval=pad_val, preserve_range=True, order=inter_order)
+        mask_rot = rotate(body_image.astype(bool), angle_val, resize=True, mode='constant', cval=0, order=0).astype(int)
+
+        return ct_rot, mask_rot
+
+    @staticmethod
+    def _crop_body_bbox(ct_image, body_image):
+        body_bbox = get_body_mask_bb(body_image)
+        ct_image = ct_image[body_bbox[0]:body_bbox[2], body_bbox[1]:body_bbox[3]]
+        body_image = body_image[body_bbox[0]:body_bbox[2], body_bbox[1]:body_bbox[3]]
+        return ct_image, body_image
+
+    def _run_preprocessing(self, ct_image, body_image):
+        clip_range = self.config.clip_range
+        scale_range = self.config.scale_range
+        ct_image[body_image == 0] = clip_range[0]
+        ct_image = np.clip(ct_image, clip_range[0], clip_range[1])
+        normalizer = interp1d(clip_range, scale_range)
+        ct_image = normalizer(ct_image)
+
+        return ct_image
+
+    @staticmethod
+    def _apply_square_padding(ct_image, pad_val, pad_ratio):
+        # Apply pad, pad_val should be the air intensity value (scaled / non-scaled)
+        padded_image = get_symmetric_pad_larger_dim(ct_image, pad_ratio, pad_val)
+
+        return padded_image
+
+    def _apply_xy_translation(self, ct_image, pad_val, trans_ratio_x, trans_ratio_y):
+        img_dim = ct_image.shape[0]
+        trans_dim_x = int(round(img_dim * trans_ratio_x))
+        trans_dim_y = int(round(img_dim * trans_ratio_y))
+
+        tform = SimilarityTransform(translation=(trans_dim_x, trans_dim_y))
+        inter_order = self.config.inter_order
+        trans_image = warp(ct_image, tform, mode='constant', cval=pad_val, order=inter_order)
+
+        return trans_image
+
+
+class SyntheticMaskGenerator:
+    def __init__(self, config):
+        self.config = config
+
+    def generate_random_config(self):
+        dim_ratio_range = self.config['augmentation']['mask']['square']['dimension_range']
+        circle_dim_ratio_range = self.config['augmentation']['mask']['round']['dimension_range']
+        circle_offset_ratio_max = self.config['augmentation']['mask']['round']['offset_max_ratio_range']
+
+        return {
+            'square_dim_ratio': random.uniform(dim_ratio_range[0], dim_ratio_range[1]),
+            'round_apply': get_random_apply_flag(self.config['augmentation']['mask']['round']['random_apply_p']),
+            'round_apply_dominance': get_random_apply_flag(self.config['augmentation']['mask']['round']['apply_dominance_p']),
+            'round_circle_dim_ratio': random.uniform(circle_dim_ratio_range[0], circle_dim_ratio_range[1]),
+            'round_circle_offset_ratio_x': random.uniform(-circle_offset_ratio_max, circle_offset_ratio_max),
+            'round_circle_offset_ratio_y': random.uniform(-circle_offset_ratio_max, circle_offset_ratio_max)
+        }
+
+    def generate_mask(self, random_config=None):
+        if random_config is None:
+            random_config = self.generate_random_config()
+
+        image_size = self.config['data']['image_size']
+        fov_mask = np.zeros((image_size, image_size), dtype=int)
+        fov_mask.fill(1)
+
+        fov_mask, square_mask_dim = self._apply_random_square_mask(
+            fov_mask, random_config['square_dim_ratio'])
+
+        if random_config['round_apply']:
+            fov_mask = self._apply_random_circle_mask(
+                fov_mask, square_mask_dim, random_config)
+
+        fov_mask = np.repeat(fov_mask[np.newaxis, :, :], 3, axis=0)
+
+        return fov_mask
+
+    @staticmethod
+    def _apply_random_square_mask(fov_mask, dim_ratio):
+        # dim_ratio_range = self.config['augmentation']['mask']['square']['dimension_range']
+        # dim_ratio = random.uniform(dim_ratio_range[0], dim_ratio_range[1])
+
+        image_dim = fov_mask.shape[0]
+        mask_dim = int(round(image_dim * dim_ratio))
+
+        square_mask = np.zeros(fov_mask.shape, dtype=int)
+        idx_low = int(round(image_dim - mask_dim) / 2)
+        square_mask[idx_low:(idx_low + mask_dim), idx_low:(idx_low + mask_dim)] = 1
+
+        fov_mask[square_mask == 0] = 0
+
+        return fov_mask, mask_dim
+
+    @staticmethod
+    def _apply_random_circle_mask(fov_mask, spec_dim, random_config):
+        if random_config['round_apply_dominance']:
+            # The round mask locate in the center and with the same size of the square mask.
+            r = int(round(spec_dim / 2))
+            round_mask = get_round_mask(fov_mask.shape, 0, 0, r)
+        else:
+            # The radius and the size will be randomly determined
+            # circle_dim_ratio_range = self.config['augmentation']['mask']['round']['dimension_range']
+            dim_half = int(round(spec_dim / 2))
+            r = random_config['round_circle_dim_ratio'] * dim_half
+            # circle_offset_ratio_max = self.config['augmentation']['mask']['round']['offset_max_ratio_range']
+            dim_half_diff = int(round(r - dim_half))
+            off_x = int(round(dim_half_diff * random_config['round_circle_offset_ratio_x']))
+            off_y = int(round(dim_half_diff * random_config['round_circle_offset_ratio_y']))
+            round_mask = get_round_mask(fov_mask.shape, off_x, off_y, r)
+
+        fov_mask[round_mask == 0] = 0
+
+        return fov_mask
+
+
+class WithheldTestUtils:
+    """
+    Generate per run based internal evaluation set (supposed to be different configuration for each run)
+    """
+    def __init__(self, config):
+        self.config = config
+
+        self.out_h5_dir = os.path.join(config.data_dir, 'h5_internal_evaluation_v2')
+        self.ds_utils = get_dataset_utils(config.dataset)
+        self.tci_strata = [0, 0.15, 0.30, 0.50, 1.0]
+
+    def check_single_case(self, h5_case_name):
+        logger.info(f'====== Check case: {h5_case_name}')
+
+        in_h5_path = os.path.join(
+            self.out_h5_dir,
+            f'{h5_case_name}.hdf5')
+
+        print(f'Load {in_h5_path}')
+        db = h5py.File(in_h5_path, 'r')
+
+        n_sample = db['sample'].attrs['n_sample']
+        print(f'Number of sample: {n_sample}')
+
+        tci_dict = []
+        for idx_sample in range(n_sample):
+            sample_name = f'sample{idx_sample}'
+            # self.check_single_sample(h5_case_name, sample_name)
+            sample_tci_list = db['sample'][sample_name].attrs['tci_value_list']
+            tci_mean = np.mean(sample_tci_list)
+            tci_dict.append({
+                'sample_name': sample_name,
+                'tci_val': tci_mean
+            })
+
+        tci_df = pd.DataFrame(tci_dict)
+        tci_df['tci_strata'] = np.digitize(tci_df['tci_val'].to_list(), self.tci_strata)
+        # tci_df = tci_df.sort_values(by='tci_strata')
+        for strata_val, strata_gp in tci_df.groupby(by='tci_strata'):
+            print(f'Strata: {strata_val}')
+            print(strata_gp['sample_name'].to_list())
+
+        db.close()
+
+    def check_single_raw(self, h5_file_name, out_dir):
+        os.makedirs(out_dir, exist_ok=True)
+
+        in_h5_path = os.path.join(
+            self.out_h5_dir,
+            h5_file_name)
+        print(f'Load {in_h5_path}')
+
+        db = h5py.File(in_h5_path, 'r')
+        raw_grp = db['raw']
+        print(f'Save to {out_dir}')
+        n_slice = db.attrs['n_slice']
+        for idx_slice in range(n_slice):
+            ct_img = np.rot90(raw_grp['ct'][idx_slice, :, :])
+            lung_img = np.rot90(raw_grp['lung_mask'][idx_slice, :, :])
+            body_img = np.rot90(raw_grp['body_mask'][idx_slice, :, :])
+
+            save_png_w_2d_npy(ct_img, [-1000, 600],
+                              os.path.join(out_dir, f'ct_{idx_slice}.png'))
+            save_png_w_2d_npy(lung_img, [0, 1],
+                              os.path.join(out_dir, f'lung_{idx_slice}.png'))
+            save_png_w_2d_npy(body_img, [0, 1],
+                              os.path.join(out_dir, f'body_{idx_slice}.png'))
+        db.close()
+
+    def get_single_raw_input_format(self, h5_file_name):
+        in_h5_path = os.path.join(
+            self.out_h5_dir,
+            h5_file_name)
+        print(f'Load {in_h5_path}')
+
+        db = h5py.File(in_h5_path, 'r')
+        raw_grp = db['raw']
+        idx_slice = 2
+        ct_img = np.rot90(raw_grp['ct'][idx_slice, :, :])
+        body_img = np.rot90(raw_grp['body_mask'][idx_slice, :, :])
+        db.close()
+
+        clip_range = self.config.clip_range
+        scale_range = self.config.scale_range
+        ct_img[body_img == 0] = clip_range[0]
+        ct_img = np.clip(ct_img, clip_range[0], clip_range[1])
+        normalizer = interp1d(clip_range, scale_range)
+        ct_img = normalizer(ct_img)
+
+        resize_dim = self.config.image_size
+        inter_order = self.config.inter_order
+        ct_img = resize(ct_img, (resize_dim, resize_dim), order=inter_order)
+
+        return ct_img
+
+    def check_single_sample(self, h5_case_name, sample_name, out_dir):
+        """
+        1. Check the raw figures (for each slice).
+            a. ct, window [-1000, 600]
+            b. lung
+            c. body
+        2. Check 5 samples
+            a. ct slice [-1, 1]
+            b. lung
+            c. body
+            d. artificial fov
+            c. corrupted
+        """
+        logger.info(f'====== Check single sample: {h5_case_name} - {sample_name}')
+
+        in_h5_path = os.path.join(
+            self.out_h5_dir,
+            f'{h5_case_name}.hdf5')
+
+        logger.info(f'Save to {out_dir}')
+        os.makedirs(out_dir, exist_ok=True)
+
+        logger.info(f'Load {in_h5_path}')
+        db = h5py.File(in_h5_path, 'r')
+
+        n_slice = db.attrs['n_slice']
+        # Check generated samples
+        sample_grp = db['sample'][sample_name]
+
+        fov_mask = sample_grp['fov_mask'][0]
+        save_png_w_2d_npy(fov_mask, [0, 1],
+                          os.path.join(out_dir, f'fov_mask.png'))
+
+        for idx_slice in range(n_slice):
+            ct_img = sample_grp['ct'][idx_slice, 0, :, :]
+            lung_img = sample_grp['lung_mask'][idx_slice, 0, :, :]
+            body_img = sample_grp['body_mask'][idx_slice, 0, :, :]
+
+            corrupt_img = ct_img.copy()
+            corrupt_img[fov_mask == 0] = 0
+
+            save_png_w_2d_npy(ct_img, [-1, 1],
+                              os.path.join(out_dir, f'ct_{idx_slice}.png'))
+            save_png_w_2d_npy(lung_img, [0, 1],
+                              os.path.join(out_dir, f'lung_{idx_slice}.png'))
+            save_png_w_2d_npy(body_img, [0, 1],
+                              os.path.join(out_dir, f'body_{idx_slice}.png'))
+            save_png_w_2d_npy(corrupt_img, [-1, 1],
+                              os.path.join(out_dir, f'corrupt_{idx_slice}.png'))
+
+            # Get the TCI using the corrupted version of body mask
+            corrupt_body_img = body_img.copy().astype(np.int)
+            ppr_mask = 1 - fov_mask
+            corrupt_body_img[ppr_mask == 1] = 0
+            tci_val = get_tci_value(corrupt_body_img, ppr_mask)
+
+            # Check if body mask out of boundary
+            boundary_test = check_mask_boundary_extrude(body_img)
+
+            logger.info(f'Slice {idx_slice}: TCI - {tci_val}; Boundary - {boundary_test}')
+
+        db.close()
+
+    def show_out_h5_hierarchy(self, case_name):
+        h5_filename = f'{case_name}.hdf5'
+        h5_path = os.path.join(self.out_h5_dir, h5_filename)
+
+        def print_attrs(name, obj):
+            print(name)
+            for key, val in obj.attrs.items():
+                print("    %s: %s" % (key, val))
+
+        db = h5py.File(h5_path, 'r')
+        print_attrs('ROOT', db)
+        db.visititems(print_attrs)
+        db.close()
