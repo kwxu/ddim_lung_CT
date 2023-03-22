@@ -928,11 +928,50 @@ class WithheldTestUtils:
         normalizer = interp1d(clip_range, scale_range)
         ct_img = normalizer(ct_img)
 
-        resize_dim = self.config.image_size
-        inter_order = self.config.inter_order
-        ct_img = resize(ct_img, (resize_dim, resize_dim), order=inter_order)
+        if ct_img.shape[0] > self.config.image_size:
+            resize_dim = self.config.image_size
+            inter_order = self.config.inter_order
+            ct_img = resize(ct_img, (resize_dim, resize_dim), order=inter_order)
 
         return ct_img
+
+    def get_corrupt_sample_w_square_mask(self, h5_file_name, square_ratio, output_dir=None):
+        ct_img = self.get_single_raw_input_format(h5_file_name)
+        image_dim = ct_img.shape[0]
+        mask_dim = int(round(image_dim * square_ratio))
+
+        square_mask = np.zeros(ct_img.shape, dtype=int)
+        idx_low = int(round(image_dim - mask_dim) / 2)
+        square_mask[idx_low:(idx_low + mask_dim), idx_low:(idx_low + mask_dim)] = 1
+
+        corrupted_img = ct_img.copy()
+        corrupted_img[square_mask == 0] = 0
+
+        if output_dir is not None:
+            os.makedirs(output_dir, exist_ok=True)
+            save_png_w_2d_npy(ct_img, [0, 1], os.path.join(output_dir, 'ct.png'))
+            save_png_w_2d_npy(square_mask, [0, 1], os.path.join(output_dir, 'mask.png'))
+            save_png_w_2d_npy(corrupted_img, [0, 1], os.path.join(output_dir, 'corrupt.png'))
+
+        return ct_img, square_mask
+
+    def get_corrupt_sample_w_cen_circle(self, h5_file_name, circle_ratio, output_dir=None):
+        ct_img = self.get_single_raw_input_format(h5_file_name)
+        image_dim = ct_img.shape[0]
+        r = 0.5 * circle_ratio * image_dim
+
+        mask = 1 - get_round_mask(ct_img.shape, 0, 0, r)
+
+        corrupted_img = ct_img.copy()
+        corrupted_img[mask == 0] = 0
+
+        if output_dir is not None:
+            os.makedirs(output_dir, exist_ok=True)
+            save_png_w_2d_npy(ct_img, [0, 1], os.path.join(output_dir, 'ct.png'))
+            save_png_w_2d_npy(mask, [0, 1], os.path.join(output_dir, 'mask.png'))
+            save_png_w_2d_npy(corrupted_img, [0, 1], os.path.join(output_dir, 'corrupt.png'))
+
+        return ct_img, mask
 
     def check_single_sample(self, h5_case_name, sample_name, out_dir):
         """
@@ -988,12 +1027,12 @@ class WithheldTestUtils:
             corrupt_body_img = body_img.copy().astype(np.int)
             ppr_mask = 1 - fov_mask
             corrupt_body_img[ppr_mask == 1] = 0
-            tci_val = get_tci_value(corrupt_body_img, ppr_mask)
+            # tci_val = get_tci_value(corrupt_body_img, ppr_mask)
 
             # Check if body mask out of boundary
-            boundary_test = check_mask_boundary_extrude(body_img)
+            # boundary_test = check_mask_boundary_extrude(body_img)
 
-            logger.info(f'Slice {idx_slice}: TCI - {tci_val}; Boundary - {boundary_test}')
+            # logger.info(f'Slice {idx_slice}: TCI - {tci_val}; Boundary - {boundary_test}')
 
         db.close()
 

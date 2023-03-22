@@ -20,7 +20,7 @@ import torchvision.utils as tvu
 from matplotlib import colors
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
-from functions.denoising import generalized_steps
+from functions.denoising import generalized_steps, generalized_inpainting_steps
 
 
 def torch2hwcuint8(x, clip=False):
@@ -708,3 +708,55 @@ class SampleSpecificUtils:
                 png_path = os.path.join(out_png_dir, f'{show_tag}_{t}.png')
                 tvu.save_image(img[0], png_path)
 
+    def get_inpainting_x0_prediction(self, x0_gt, mask_gt, n_steps, n_resample, ckpt_id, n_output_steps, output_dir):
+        os.makedirs(output_dir, exist_ok=True)
+        print(f'Save to {output_dir}')
+
+        x0_gt = data_transform(self.config, x0_gt)
+        x0_gt = torch.from_numpy(x0_gt).float()
+        mask_gt = torch.from_numpy(mask_gt).int()
+
+        x = torch.randn_like(x0_gt)
+
+        model = self._load_model(ckpt_id)
+        model.eval()
+
+        step_skip = self.num_timesteps // n_steps
+        seq = range(0, self.num_timesteps, step_skip)
+
+        xs, x0_preds = generalized_inpainting_steps(
+            x.to(self.device),
+            x0_gt.to(self.device),
+            mask_gt.to(self.device),
+            seq,
+            model,
+            self.betas,
+            n_resample,
+            eta=0.0
+        )
+
+        # print(len(xs))
+        n_output_skip = n_steps // n_output_steps
+        output_idx_list = list(range(0, n_steps, n_output_skip))
+        output_idx_list.append(len(xs) - 1)
+        for x_idx in tqdm.tqdm(output_idx_list, total=len(output_idx_list)):
+            x = xs[x_idx].cpu()
+            x[mask_gt == 1] = x0_gt[mask_gt == 1][:]
+            x = inverse_data_transform(self.config, x)
+
+            t = n_steps - x_idx
+            tvu.save_image(
+                x[0],
+                os.path.join(output_dir, f't_{t}.png')
+            )
+
+        x0_gt = inverse_data_transform(self.config, x0_gt)
+        tvu.save_image(
+            x0_gt[0],
+            os.path.join(output_dir, 'x0_gt.png')
+        )
+        diff_gt = (x0_gt - inverse_data_transform(self.config, xs[-1])).abs()
+        tvu.save_image(
+            diff_gt[0],
+            os.path.join(output_dir, 'diff.png')
+        )
