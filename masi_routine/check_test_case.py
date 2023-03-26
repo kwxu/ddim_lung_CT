@@ -18,7 +18,7 @@ def dict2namespace(config):
 
 
 def main():
-    yml_config = '/nfs/masi/xuk9/src/ddim_lung_CT/configs/lung_ct_full_body.yml'
+    yml_config = '/nfs/masi/xuk9/src/ddim_lung_CT/configs/lung_ct_full_body.exp1.yml'
 
     # parse config file
     with open(yml_config, "r") as f:

@@ -84,7 +84,7 @@ def inpainting_circle():
 if __name__ == "__main__":
     test_case_h5 = "00000003time20140109_T8.hdf5"
     ckpt_id = 360000
-    yml_config = '/nfs/masi/xuk9/src/ddim_lung_CT/configs/lung_ct_full_body.yml'
+    yml_config = '/nfs/masi/xuk9/src/ddim_lung_CT/configs/lung_ct_full_body.exp1.yml'
 
     # parse config file
     with open(yml_config, "r") as f:
