@@ -55,6 +55,6 @@ def plot_result_single():
 
 if __name__ == "__main__":
     # split_two_batch()
-    # run_repaint()
-    plot_result_single()
+    run_repaint()
+    # plot_result_single()
 
