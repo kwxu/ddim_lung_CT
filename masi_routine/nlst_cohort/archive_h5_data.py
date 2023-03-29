@@ -48,6 +48,7 @@ def generate_all_t0():
     os.makedirs(output_dir, exist_ok=True)
 
     in_record_df = filter_scan_w_condition(pd.read_csv(in_record_csv))
+    # in_record_df = in_record_df.tail(2000)
     # use_record_df = in_record_df.head(10)
     uid_list = in_record_df['series_uid'].to_list()
 
@@ -56,6 +57,9 @@ def generate_all_t0():
     def _process_single_case(uid):
         in_nii = os.path.join(in_data_dir, f'{uid}.nii.gz')
         out_h5 = os.path.join(output_dir, f'{uid}.hdf5')
+        if os.path.exists(out_h5):
+            rm_cmd = f'rm -f {out_h5}'
+            os.system(rm_cmd)
 
         img_obj = ScanWrapper(in_nii)
         img = img_obj.get_data()
@@ -81,6 +85,23 @@ def generate_all_t0():
       for uid in tqdm(uid_list, total=len(uid_list)))
 
 
+def check_missing():
+    output_dir = os.path.join(archive_root, 'all')
+    in_record_df = filter_scan_w_condition(pd.read_csv(in_record_csv))
+    in_record_df = in_record_df.tail(200)
+
+    uid_list = in_record_df['series_uid'].to_list()
+
+    n_missing = 0
+    for uid in uid_list:
+        hdf5_path = os.path.join(output_dir, f'{uid}.hdf5')
+        if not os.path.exists(hdf5_path):
+            print(f'Missing {uid}')
+            n_missing += 1
+
+    print(f'Total missing: {n_missing}')
+
+
 if __name__ == '__main__':
     archive_root = '/local_storage2/Data/NLST/HDF5/T0'
     os.makedirs(archive_root, exist_ok=True)
@@ -90,3 +111,4 @@ if __name__ == '__main__':
 
     # get_num_candidate_cases()
     generate_all_t0()
+    # check_missing()

@@ -46,7 +46,8 @@ def generalized_inpainting_steps(x, x0_gt, mask, seq, model, b, n_resample, **kw
         x0_preds = []
         xs = [x]
 
-        for i, j in tqdm(zip(reversed(seq), reversed(seq_next)), total=len(seq)):
+        # for i, j in tqdm(zip(reversed(seq), reversed(seq_next)), total=len(seq)):
+        for i, j in zip(reversed(seq), reversed(seq_next)):
             t = (torch.ones(n) * i).to(x.device)
             next_t = (torch.ones(n) * j).to(x.device)
 
