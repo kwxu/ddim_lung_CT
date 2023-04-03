@@ -5,7 +5,7 @@ import os
 import logging
 import torch.utils.data as data
 import random
-from .utils_lung import get_dataset_utils, ImageTransformer, SyntheticMaskGenerator
+from .utils_lung import get_dataset_utils, ImageTransformer
 import h5py
 
 
@@ -27,7 +27,6 @@ class ChestDataLoader(data.Dataset):
         # Here we use a combination of "train" and "valid"
         self.mode_slice_df = slice_record_df.loc[(slice_record_df["train"] == 1) | (slice_record_df["valid"] == 1)]
 
-        self.mask_generator = SyntheticMaskGenerator(self.config)
         self.sample_generator = ImageTransformer(self.config)
 
         self.h5_dir = os.path.join(config.data_dir, 'h5_data')
@@ -51,10 +50,8 @@ class ChestDataLoader(data.Dataset):
         db.close()
 
         generated_sample_img, _, _ = self.sample_generator.generate_sample(slice_img_dict)
-        generated_mask_img = self.mask_generator.generate_mask()
-
         generated_sample_img = np.float32(generated_sample_img)
 
-        return generated_sample_img, generated_mask_img
+        return generated_sample_img, 0
 
 

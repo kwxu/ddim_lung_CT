@@ -663,8 +663,7 @@ class ImageTransformer:
         scale_ratio = ori_dim / resize_dim
 
         # Reshape the image for torch (C, H, W)
-        # ct_image = np.repeat(ct_image[np.newaxis, :, :], self.config.channels, axis=0)
-        ct_image = ct_image[None, :, :]
+        ct_image = np.repeat(ct_image[np.newaxis, :, :], self.config.channels, axis=0)
 
         return ct_image, random_config, scale_ratio
 
@@ -770,14 +769,14 @@ class SyntheticMaskGenerator:
         self.config = config
 
     def generate_random_config(self):
-        dim_ratio_range = self.config.augmentation.mask.square.dimension_range
-        circle_dim_ratio_range = self.config.augmentation.mask.round.dimension_range
-        circle_offset_ratio_max = self.config.augmentation.mask.round.offset_max_ratio_range
+        dim_ratio_range = self.config['augmentation']['mask']['square']['dimension_range']
+        circle_dim_ratio_range = self.config['augmentation']['mask']['round']['dimension_range']
+        circle_offset_ratio_max = self.config['augmentation']['mask']['round']['offset_max_ratio_range']
 
         return {
             'square_dim_ratio': random.uniform(dim_ratio_range[0], dim_ratio_range[1]),
-            'round_apply': get_random_apply_flag(self.config.augmentation.mask.round.random_apply_p),
-            'round_apply_dominance': get_random_apply_flag(self.config.augmentation.mask.round.apply_dominance_p),
+            'round_apply': get_random_apply_flag(self.config['augmentation']['mask']['round']['random_apply_p']),
+            'round_apply_dominance': get_random_apply_flag(self.config['augmentation']['mask']['round']['apply_dominance_p']),
             'round_circle_dim_ratio': random.uniform(circle_dim_ratio_range[0], circle_dim_ratio_range[1]),
             'round_circle_offset_ratio_x': random.uniform(-circle_offset_ratio_max, circle_offset_ratio_max),
             'round_circle_offset_ratio_y': random.uniform(-circle_offset_ratio_max, circle_offset_ratio_max)
@@ -787,7 +786,7 @@ class SyntheticMaskGenerator:
         if random_config is None:
             random_config = self.generate_random_config()
 
-        image_size = self.config.image_size
+        image_size = self.config['data']['image_size']
         fov_mask = np.zeros((image_size, image_size), dtype=int)
         fov_mask.fill(1)
 
@@ -798,8 +797,7 @@ class SyntheticMaskGenerator:
             fov_mask = self._apply_random_circle_mask(
                 fov_mask, square_mask_dim, random_config)
 
-        # fov_mask = np.repeat(fov_mask[np.newaxis, :, :], 3, axis=0)
-        fov_mask = fov_mask[None, :, :]
+        fov_mask = np.repeat(fov_mask[np.newaxis, :, :], 3, axis=0)
 
         return fov_mask
 
