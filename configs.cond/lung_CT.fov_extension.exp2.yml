@@ -47,7 +47,7 @@ model:
     ema_rate: 0.999
     ema: True
     resamp_with_conv: True
-    invalid_region_val: 'noise'
+    invalid_region_val: 'zero'
 
 diffusion:
     beta_schedule: linear

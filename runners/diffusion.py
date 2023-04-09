@@ -108,8 +108,15 @@ class Diffusion(object):
 
                 mask = mask.to(self.device)
                 x_cond = x.clone()
-                e_cond = torch.randn_like(x_cond)
-                x_cond[mask == 0] = e_cond[mask == 0][:]
+
+                invalid_region_val_type = self.config.model.invalid_region_val
+                if invalid_region_val_type == 'noise':
+                    e_cond = torch.randn_like(x_cond)
+                    x_cond[mask == 0] = e_cond[mask == 0][:]
+                elif invalid_region_val_type == 'zero':
+                    x_cond[mask == 0] = 0
+                else:
+                    raise NotImplementedError
 
                 # antithetic sampling
                 t = torch.randint(
