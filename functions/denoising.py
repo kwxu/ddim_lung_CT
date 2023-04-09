@@ -45,6 +45,7 @@ def generalized_inpainting_steps(x, x0_gt, mask, seq, model, b, n_resample, **kw
         seq_next = [-1] + list(seq[:-1])
         x0_preds = []
         xs = [x]
+        xts = []
 
         # for i, j in tqdm(zip(reversed(seq), reversed(seq_next)), total=len(seq)):
         for i, j in zip(reversed(seq), reversed(seq_next)):
@@ -64,6 +65,8 @@ def generalized_inpainting_steps(x, x0_gt, mask, seq, model, b, n_resample, **kw
                 e = torch.randn_like(x0_t)
                 xt = x0_t * at.sqrt() + e * (1.0 - at).sqrt()
 
+            xts.append(xt.to('cpu'))
+
             et = model(xt, t)
             x0_t = (xt - et * (1 - at).sqrt()) / at.sqrt()
             x0_t[mask == 1] = x0_gt[mask == 1][:]
@@ -75,7 +78,7 @@ def generalized_inpainting_steps(x, x0_gt, mask, seq, model, b, n_resample, **kw
             xt_next = at_next.sqrt() * x0_t + c1 * torch.randn_like(x) + c2 * et
             xs.append(xt_next.to('cpu'))
 
-        return xs, x0_preds
+        return xs, x0_preds, xts
 
 
 def ddpm_steps(x, seq, model, b, **kwargs):

@@ -3,7 +3,7 @@ import numpy as np
 import torch
 from runners.runner_utils import get_beta_schedule
 from models.diffusion import Model
-from functions.denoising import generalized_inpainting_steps
+from functions.denoising import generalized_inpainting_steps, compute_alpha
 
 
 class InpaintingSampleUtils:
@@ -43,7 +43,25 @@ class InpaintingSampleUtils:
         self.model = model
         self.model.eval()
 
-    def run_inference(self, x0_gt, mask_gt, n_steps, n_resample):
+    def generate_forward_steps(self, x0_gt, n_steps):
+        x0_gt = torch.from_numpy(x0_gt).float()
+        step_skip = self.num_timesteps // n_steps
+        seq = range(0, self.num_timesteps, step_skip)
+
+        xts = []
+        for i in reversed(seq):
+            t = (torch.ones(1) * i)
+            at = compute_alpha(self.betas.cpu(), t.long())
+            e = torch.randn_like(x0_gt)
+
+            xt = x0_gt * at.sqrt() + e * (1.0 - at).sqrt()
+
+            xts.append(xt)
+
+        return xts
+
+
+    def run_inference(self, x0_gt, mask_gt, n_steps, n_resample, last_only=True):
         """
         x0_gt should be in range [-1, 1]
         """
@@ -54,7 +72,7 @@ class InpaintingSampleUtils:
         seq = range(0, self.num_timesteps, step_skip)
         x = torch.randn_like(x0_gt)
 
-        xs, _ = generalized_inpainting_steps(
+        xs, _, xts = generalized_inpainting_steps(
             x.to(self.device),
             x0_gt.to(self.device),
             mask_gt.to(self.device),
@@ -65,6 +83,8 @@ class InpaintingSampleUtils:
             eta=0.0
         )
 
-        x0_pred = xs[-1].cpu().numpy()
-
-        return x0_pred
+        if last_only:
+            x0_pred = xs[-1].cpu().numpy()
+            return x0_pred
+        else:
+            return xs, xts

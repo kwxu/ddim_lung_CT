@@ -7,6 +7,52 @@ from scipy.interpolate import interp1d
 from cv2 import resize
 import cv2
 import h5py
+from runners.inpainting import InpaintingSampleUtils
+import yaml
+import argparse
+import torchvision.utils as tvu
+import torch
+import matplotlib.pyplot as plt
+from matplotlib import colors
+
+
+def dict2namespace(config):
+    namespace = argparse.Namespace()
+    for key, value in config.items():
+        if isinstance(value, dict):
+            new_value = dict2namespace(value)
+        else:
+            new_value = value
+        setattr(namespace, key, new_value)
+    return namespace
+
+
+def data_transform(config, X):
+    if config.data.uniform_dequantization:
+        X = X / 256.0 * 255.0 + torch.rand_like(X) / 256.0
+    if config.data.gaussian_dequantization:
+        X = X + torch.randn_like(X) * 0.01
+
+    if config.data.rescaled:
+        X = 2 * X - 1.0
+
+    if hasattr(config, "image_mean"):
+        return X - config.image_mean.to(X.device)[None, ...]
+
+    return X
+
+
+def inverse_data_transform(config, X):
+    if hasattr(config, "image_mean"):
+        X = X + config.image_mean.to(X.device)[None, ...]
+
+    if config.data.logit_transform:
+        X = torch.sigmoid(X)
+    elif config.data.rescaled:
+        X = (X + 1.0) / 2.0
+
+    return torch.clamp(X, 0.0, 1.0)
+
 
 
 def get_pid_date_from_case_str(case_str):
@@ -116,6 +162,109 @@ def generate_demo_sample_h5():
         db.close()
 
 
+class SampleEvaluationUtils:
+    def __init__(self):
+        yml_config = '/nfs/masi/xuk9/src/ddim_lung_CT/configs/lung_ct_full_body.exp1.yml'
+        project_root = '/nfs/masi/xuk9/Projects/ChestExtrapolation/ddim_lung_CT/exp1'
+        ckpt_path = os.path.join(project_root, 'models/ckpt_360000.pth')
+
+        with open(yml_config, "r") as f:
+            config = yaml.safe_load(f)
+        self.config = dict2namespace(config)
+
+        self.sample_utils = InpaintingSampleUtils(self.config)
+        self.sample_utils.load_model(ckpt_path)
+
+    def generate_sample_trajectory(self, case_name, sample_name):
+        h5_path = os.path.join(project_dir, 'h5_dir', f'{case_name}.hdf5')
+
+        db = h5py.File(h5_path, 'r')
+        sample_grp = db['sample'][sample_name]
+        ct_slice = sample_grp['ct'][0, 0, :, :]
+        fov_mask = sample_grp['fov_mask'][0, :, :]
+        db.close()
+
+        # print(ct_slice.shape)
+        # print(fov_mask.shape)
+
+        corrupt_slice = ct_slice.copy()
+        corrupt_slice[fov_mask == 0] = 0
+        ct_slice = ct_slice[None, None, :, :]
+        ct_slice = data_transform(self.config, ct_slice)
+        fov_mask = fov_mask[None, None, :, :]
+
+        # n_steps = 50
+        # n_resample = 20
+        # forward_xts = self.sample_utils.generate_forward_steps(ct_slice, n_steps)
+        #
+        # xs, backward_xts = self.sample_utils.run_inference(
+        #     x0_gt=ct_slice,
+        #     mask_gt=fov_mask,
+        #     # n_steps=50,
+        #     # n_resample=20,
+        #     n_steps=n_steps,
+        #     n_resample=n_resample,
+        #     last_only=False
+        # )
+
+        out_png_dir = os.path.join(project_dir, 'example_png', f'{case_name}_{sample_name}')
+        os.makedirs(out_png_dir, exist_ok=True)
+        print(f'Save to {out_png_dir}')
+
+        def save_png(img, out_png):
+            img = inverse_data_transform(self.config, img)
+            tvu.save_image(img, out_png)
+
+        def save_png_w_mask(img, mask, out_png, remove_background=False):
+            # img = inverse_data_transform(self.config, img)
+            # img = img.numpy()
+
+            if remove_background:
+                img[mask == 0] = 0
+
+            fig, ax = plt.subplots()
+            ax.axis('off')
+            ax.imshow(
+                img,
+                interpolation='bilinear',
+                cmap='gray',
+                norm=colors.Normalize(vmin=0, vmax=1))
+
+            mask = mask.astype(float)
+            mask[mask == 0] = np.nan
+            ax.imshow(
+                mask,
+                cmap='Oranges',
+                norm=colors.Normalize(vmin=0, vmax=1),
+                alpha=0.3
+            )
+            plt.savefig(out_png, bbox_inches='tight', pad_inches=0, dpi=300)
+            plt.close()
+
+        # save_png_w_mask(fov_mask[0, 0, :, :], fov_mask[0, 0, :, :], os.path.join(out_png_dir, 'mask.png'))
+        save_png_w_mask(corrupt_slice, fov_mask[0, 0, :, :], os.path.join(out_png_dir, 'corrupt.png'))
+
+        # save_png(torch.from_numpy(ct_slice[0, 0, :, :]), os.path.join(out_png_dir, 'gt.png'))
+        # tvu.save_image(torch.from_numpy(corrupt_slice), os.path.join(out_png_dir, 'input.png'))
+        #
+        # for step_idx in range(n_steps):
+        #     # save_png(forward_xts[step_idx], os.path.join(out_png_dir, f'forward_step{step_idx}.png'))
+        #     # save_png(backward_xts[step_idx], os.path.join(out_png_dir, f'backward_step{step_idx}.png'))
+        #     save_png_w_mask(
+        #         forward_xts[step_idx][0, 0, :, :],
+        #         fov_mask[0, 0, :, :],
+        #         os.path.join(out_png_dir, f'forward_step{step_idx}.png'), remove_background=True)
+        #     save_png_w_mask(
+        #         backward_xts[step_idx][0, 0, :, :],
+        #         fov_mask[0, 0, :, :],
+        #         os.path.join(out_png_dir, f'backward_step{step_idx}.png'))
+        #
+        # save_png(xs[-1][0, 0, :, :], os.path.join(out_png_dir, 'pred.png'))
+        # save_png(xs[0][0, 0, :, :], os.path.join(out_png_dir, 'forward_seed.png'))
+        #
+        # tvu.save_image(torch.from_numpy(fov_mask).float(), os.path.join(out_png_dir, 'mask.png'))
+
+
 if __name__ == '__main__':
     project_dir = '/local_storage/xuk9/Projects/DDIM_lung_CT/Publication/midl2023/method'
     os.makedirs(project_dir, exist_ok=True)
@@ -136,4 +285,9 @@ if __name__ == '__main__':
     print(f'Load {demo_record_csv}')
     demo_record_df = pd.read_csv(demo_record_csv)
 
-    generate_demo_sample_h5()
+    # generate_demo_sample_h5()
+
+    sample_utils = SampleEvaluationUtils()
+    # sample_utils.generate_sample_trajectory('00000459time20180425', 'sample0')
+    # sample_utils.generate_sample_trajectory('00000459time20180425', 'sample3')
+    sample_utils.generate_sample_trajectory('00000489time20180223', 'sample0')

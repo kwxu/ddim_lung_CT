@@ -27,7 +27,7 @@ class ScanWrapper:
         return np.prod(self.get_shape())
 
     def get_data(self):
-        return self._img.get_data()
+        return self._img.get_fdata()
 
     def get_voxel_size(self):
         return self._img.header.get_zooms()
