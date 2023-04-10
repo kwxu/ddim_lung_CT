@@ -3,7 +3,7 @@ import numpy as np
 import torch
 from runners.runner_utils import get_beta_schedule
 from models.diffusion import Model
-from functions.denoising import generalized_inpainting_steps
+from functions.denoising import generalized_repaint_steps, conditional_inpainting_steps
 
 
 class InpaintingSampleUtils:
@@ -43,7 +43,7 @@ class InpaintingSampleUtils:
         self.model = model
         self.model.eval()
 
-    def run_inference(self, x0_gt, mask_gt, n_steps, n_resample):
+    def run_inference(self, x0_gt, mask_gt, n_steps):
         """
         x0_gt should be in range [-1, 1]
         """
@@ -54,14 +54,24 @@ class InpaintingSampleUtils:
         seq = range(0, self.num_timesteps, step_skip)
         x = torch.randn_like(x0_gt)
 
-        xs, _ = generalized_inpainting_steps(
+        # xs, _ = generalized_repaint_steps(
+        #     x.to(self.device),
+        #     x0_gt.to(self.device),
+        #     mask_gt.to(self.device),
+        #     seq,
+        #     self.model,
+        #     self.betas,
+        #     n_resample,
+        #     eta=0.0
+        # )
+        xs, _ = conditional_inpainting_steps(
             x.to(self.device),
             x0_gt.to(self.device),
             mask_gt.to(self.device),
             seq,
             self.model,
             self.betas,
-            n_resample,
+            self.config.model.invalid_region_val,
             eta=0.0
         )
 

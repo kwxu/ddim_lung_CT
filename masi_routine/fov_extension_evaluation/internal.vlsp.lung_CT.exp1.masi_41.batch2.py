@@ -1,7 +1,7 @@
 import h5py
 import os
 import pandas as pd
-from masi_routine.fov_extension_evaluation.eval_utils import InternalEvaluationUtils, dict2namespace, InternalEvaluationData
+from masi_routine.fov_extension_evaluation.eval_utils import InternalEvaluationUtilsRePaint, dict2namespace, InternalEvaluationData
 import yaml
 
 def run_repaint():
@@ -16,7 +16,7 @@ def run_repaint():
         config = yaml.safe_load(f)
     config = dict2namespace(config)
 
-    runner_utils = InternalEvaluationUtils(config, ckpt_path, h5_dir)
+    runner_utils = InternalEvaluationUtilsRePaint(config, ckpt_path, h5_dir)
     runner_utils.run_inference(
         preview_dir=preview_dir
     )

@@ -16,7 +16,7 @@ from functions.ckpt_util import get_ckpt_path
 import torchvision.utils as tvu
 from matplotlib import colors
 import matplotlib.pyplot as plt
-from functions.denoising import generalized_steps, generalized_inpainting_steps
+from functions.denoising import generalized_steps, generalized_repaint_steps
 from runners.runner_utils import get_beta_schedule
 
 
@@ -693,7 +693,7 @@ class SampleSpecificUtils:
         step_skip = self.num_timesteps // n_steps
         seq = range(0, self.num_timesteps, step_skip)
 
-        xs, x0_preds = generalized_inpainting_steps(
+        xs, x0_preds = generalized_repaint_steps(
             x.to(self.device),
             x0_gt.to(self.device),
             mask_gt.to(self.device),

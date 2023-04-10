@@ -161,7 +161,7 @@ class InternalEvaluationData:
         db.close()
 
 
-class InternalEvaluationUtils:
+class InternalEvaluationUtilsRePaint:
     def __init__(self, config, ckpt_path, hdf5_data_dir):
         self.config = config
         self.dataset = InternalEvaluationData(hdf5_data_dir, corrupt_val=-1)
@@ -194,8 +194,8 @@ class InternalEvaluationUtils:
                 x0_pred = self.sample_util.run_inference(
                     x0_gt=img_data['corrupt'][sample_idx],
                     mask_gt=img_data['mask'][sample_idx],
-                    n_steps=self.sample_n_steps,
-                    n_resample=self.sample_n_resample
+                    n_steps=self.sample_n_steps
+                    # n_resample=self.sample_n_resample
                 )
 
                 pred_list.append(x0_pred)
@@ -216,4 +216,3 @@ class InternalEvaluationUtils:
                 pred_list,
                 h5_filename
             )
-
