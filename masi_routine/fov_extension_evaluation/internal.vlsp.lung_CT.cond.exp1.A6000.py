@@ -18,7 +18,9 @@ def run_inpainting():
 
     runner_utils = InternalEvaluationUtilsRePaint(config, ckpt_path, h5_dir)
     runner_utils.run_inference(
-        preview_dir=preview_dir
+        preview_dir=preview_dir,
+        # n_steps=50
+        n_steps=250
     )
 
 

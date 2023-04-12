@@ -168,10 +168,10 @@ class InternalEvaluationUtilsRePaint:
         self.sample_util = InpaintingSampleUtils(self.config)
         self.sample_util.load_model(ckpt_path)
 
-        self.sample_n_steps = 50
-        self.sample_n_resample = 20
+        # self.sample_n_steps = n_steps
+        # self.sample_n_resample = 20
 
-    def run_inference(self, preview_dir=None):
+    def run_inference(self, preview_dir=None, n_steps=50):
         # How many sample we have
         # n_sample = 0
         # for item_idx in tqdm(range(len(self.dataset)), total=len(self.dataset)):
@@ -194,7 +194,7 @@ class InternalEvaluationUtilsRePaint:
                 x0_pred = self.sample_util.run_inference(
                     x0_gt=img_data['corrupt'][sample_idx],
                     mask_gt=img_data['mask'][sample_idx],
-                    n_steps=self.sample_n_steps
+                    n_steps=n_steps
                     # n_resample=self.sample_n_resample
                 )
 
