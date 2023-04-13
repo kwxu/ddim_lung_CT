@@ -51,8 +51,10 @@ def plot_inference_result(corrupt_img, pred_img, out_png):
 
 
 class InternalEvaluationData:
-    def __init__(self, h5_dir, corrupt_val):
+    def __init__(self, h5_dir, h5_out_dir, corrupt_val):
         self.h5_dir = h5_dir
+        self.h5_out_dir = h5_out_dir
+        os.makedirs(self.h5_out_dir, exist_ok=True)
         self.h5_list = glob.glob(f'{self.h5_dir}/*.hdf5')
         self.corrupt_val = corrupt_val
 
@@ -137,6 +139,25 @@ class InternalEvaluationData:
 
         db.close()
 
+    def save_inference_mid_slice_only_v2(self, pred_list, h5_filename):
+        """
+        Save to a new hdf5 file instead of the original input one.
+        """
+        # in_h5_path = os.path.join(self.h5_dir, h5_filename)
+        out_h5_path = os.path.join(self.h5_out_dir, h5_filename)
+
+        db = h5py.File(out_h5_path, 'a')
+
+        sample_all_grp = db.require_group('sample')
+        sample_all_grp.attrs['n_sample'] = len(pred_list)
+
+        for idx_sample in range(len(pred_list)):
+            sample_name = f'sample{idx_sample}'
+            sample_grp = sample_all_grp.require_group(sample_name)
+            save_img_stack_hdf5_grp(sample_grp, pred_list[idx_sample], 'predict')
+
+        db.close()
+
     def plot_inference_result_from_hdf5(self, hdf5_filename, out_dir):
         case_name = hdf5_filename.replace('.hdf5', '')
         os.makedirs(out_dir, exist_ok=True)
@@ -162,9 +183,9 @@ class InternalEvaluationData:
 
 
 class InternalEvaluationUtilsRePaint:
-    def __init__(self, config, ckpt_path, hdf5_data_dir):
+    def __init__(self, config, ckpt_path, hdf5_data_dir, hdf5_out_idr):
         self.config = config
-        self.dataset = InternalEvaluationData(hdf5_data_dir, corrupt_val=-1)
+        self.dataset = InternalEvaluationData(hdf5_data_dir, h5_out_dir=hdf5_out_idr, corrupt_val=-1)
         self.sample_util = InpaintingSampleUtils(self.config)
         self.sample_util.load_model(ckpt_path)
 
@@ -212,7 +233,11 @@ class InternalEvaluationUtilsRePaint:
                     )
 
             h5_filename = img_data['h5_filename']
-            self.dataset.save_inference_mid_slice_only(
+            # self.dataset.save_inference_mid_slice_only(
+            #     pred_list,
+            #     h5_filename
+            # )
+            self.dataset.save_inference_mid_slice_only_v2(
                 pred_list,
                 h5_filename
             )
