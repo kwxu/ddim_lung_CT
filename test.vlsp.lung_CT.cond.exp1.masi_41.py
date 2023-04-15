@@ -9,7 +9,8 @@ def run_inpainting():
     yml_config = '/nfs/masi/xuk9/src/ddim_lung_CT/configs.cond/lung_CT.fov_extension.exp1.yml'
     ckpt_path = '/local_storage/xuk9/Projects/DDIM_lung_CT/lung_CT.cond/exp1/logs/lung_ct.cond/ckpt_300000.pth'
 
-    for n_steps in [10, 50, 250]:
+    # for n_steps in [10, 50, 250]:
+    for n_steps in [250]:
         project_root = f'/nfs/masi/xuk9/Projects/ChestExtrapolation/ddim_lung_CT.cond/exp1.{n_steps}'
         os.makedirs(project_root, exist_ok=True)
         h5_dir = os.path.join(project_root, 'h5_internal_evaluation_v2')

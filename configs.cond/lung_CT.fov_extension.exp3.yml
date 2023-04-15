@@ -36,7 +36,7 @@ lung_ct_config:
 
 model:
     type: "simple"
-    in_channels: 2
+    in_channels: 3
     out_ch: 1
     ch: 128
     ch_mult: [1, 1, 2, 2, 4, 4]
@@ -47,8 +47,8 @@ model:
     ema_rate: 0.999
     ema: True
     resamp_with_conv: True
-    invalid_region_val: 'noise'
-    in_mask_channel: False
+    invalid_region_val: 'zero'
+    in_mask_channel: True
 
 diffusion:
     beta_schedule: linear
@@ -71,8 +71,7 @@ sampling:
 optim:
     weight_decay: 0.000
     optimizer: "Adam"
-#    lr: 0.00001
-    lr: 0.000001
+    lr: 0.00001
     beta1: 0.9
     amsgrad: false
     eps: 0.00000001

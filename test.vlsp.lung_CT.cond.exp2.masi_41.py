@@ -9,7 +9,8 @@ import yaml
 def run_inpainting():
     source_h5_dir = '/nfs/masi/xuk9/Projects/ChestExtrapolation/ddim_lung_CT.cond/exp2/h5_internal_evaluation_v2'
     yml_config = '/nfs/masi/xuk9/src/ddim_lung_CT/configs.cond/lung_CT.fov_extension.exp2.yml'
-    ckpt_path = '/local_storage/xuk9/Projects/DDIM_lung_CT/lung_CT.cond/exp2/logs/lung_ct.cond/ckpt_215000.pth'
+    # ckpt_path = '/local_storage/xuk9/Projects/DDIM_lung_CT/lung_CT.cond/exp2/logs/lung_ct.cond/ckpt_215000.pth'
+    ckpt_path = '/local_storage/xuk9/Projects/DDIM_lung_CT/lung_CT.cond/exp2/logs/lung_ct.cond/ckpt_260000.pth'
 
     for n_steps in [10, 50, 250]:
         project_root = f'/nfs/masi/xuk9/Projects/ChestExtrapolation/ddim_lung_CT.cond/exp2.{n_steps}'

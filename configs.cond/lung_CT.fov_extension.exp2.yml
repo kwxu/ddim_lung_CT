@@ -48,6 +48,7 @@ model:
     ema: True
     resamp_with_conv: True
     invalid_region_val: 'zero'
+    in_mask_channel: False
 
 diffusion:
     beta_schedule: linear
