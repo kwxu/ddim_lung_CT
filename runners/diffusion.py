@@ -16,8 +16,8 @@ from functions.ckpt_util import get_ckpt_path
 import torchvision.utils as tvu
 from matplotlib import colors
 import matplotlib.pyplot as plt
-from functions.denoising import generalized_steps, generalized_inpainting_steps
-from runner_utils import get_beta_schedule
+from functions.denoising import generalized_steps, generalized_repaint_steps
+from runners.runner_utils import get_beta_schedule
 
 
 class Diffusion(object):
@@ -95,7 +95,7 @@ class Diffusion(object):
         for epoch in range(start_epoch, self.config.training.n_epochs):
             data_start = time.time()
             data_time = 0
-            for i, (x, y) in enumerate(train_loader):
+            for i, (x, mask) in enumerate(train_loader):
                 n = x.size(0)
                 data_time += time.time() - data_start
                 model.train()
@@ -106,12 +106,24 @@ class Diffusion(object):
                 e = torch.randn_like(x)
                 b = self.betas
 
+                mask = mask.to(self.device)
+                x_cond = x.clone()
+
+                invalid_region_val_type = self.config.model.invalid_region_val
+                if invalid_region_val_type == 'noise':
+                    e_cond = torch.randn_like(x_cond)
+                    x_cond[mask == 0] = e_cond[mask == 0][:]
+                elif invalid_region_val_type == 'zero':
+                    x_cond[mask == 0] = 0
+                else:
+                    raise NotImplementedError
+
                 # antithetic sampling
                 t = torch.randint(
                     low=0, high=self.num_timesteps, size=(n // 2 + 1,)
                 ).to(self.device)
                 t = torch.cat([t, self.num_timesteps - t - 1], dim=0)[:n]
-                loss = loss_registry[config.model.type](model, x, t, e, b)
+                loss = loss_registry[config.model.type](model, x, x_cond, t, e, b)
 
                 tb_logger.add_scalar("loss", loss, global_step=step)
 
@@ -681,7 +693,7 @@ class SampleSpecificUtils:
         step_skip = self.num_timesteps // n_steps
         seq = range(0, self.num_timesteps, step_skip)
 
-        xs, x0_preds = generalized_inpainting_steps(
+        xs, x0_preds = generalized_repaint_steps(
             x.to(self.device),
             x0_gt.to(self.device),
             mask_gt.to(self.device),

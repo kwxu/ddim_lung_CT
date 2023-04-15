@@ -5,12 +5,11 @@ from masi_routine.fov_extension_evaluation.eval_utils import InternalEvaluationU
 import yaml
 
 
-def run_repaint():
-    yml_config = '/nfs/masi/xuk9/src/ddim_lung_CT/configs/lung_ct_full_body.exp3.narrow_range.yml'
-    project_root = '/nfs/masi/xuk9/Projects/ChestExtrapolation/ddim_lung_CT/exp3'
-    ckpt_path = os.path.join(project_root, 'models/ckpt_265000.pth')
-    # h5_dir = os.path.join(project_root, 'h5_internal_evaluation_v2.batch1')
-    h5_dir = os.path.join(project_root, 'h5_internal_evaluation_v2.batch2')
+def run_inpainting():
+    yml_config = '/nfs/masi/xuk9/src/ddim_lung_CT/configs.cond/lung_CT.fov_extension.exp1.yml'
+    project_root = '/nfs/masi/xuk9/Projects/ChestExtrapolation/ddim_lung_CT.cond/exp1'
+    ckpt_path = os.path.join(project_root, 'models/ckpt_300000.pth')
+    h5_dir = os.path.join(project_root, 'h5_internal_evaluation_v2')
     preview_dir = os.path.join(project_root, 'result_preview_png')
 
     with open(yml_config, "r") as f:
@@ -19,10 +18,12 @@ def run_repaint():
 
     runner_utils = InternalEvaluationUtilsRePaint(config, ckpt_path, h5_dir)
     runner_utils.run_inference(
-        preview_dir=preview_dir
+        preview_dir=preview_dir,
+        # n_steps=50
+        n_steps=250
     )
 
 
 if __name__ == "__main__":
-    run_repaint()
+    run_inpainting()
 
