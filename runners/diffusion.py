@@ -115,6 +115,8 @@ class Diffusion(object):
                     x_cond[mask == 0] = e_cond[mask == 0][:]
                 elif invalid_region_val_type == 'zero':
                     x_cond[mask == 0] = 0
+                elif invalid_region_val_type == 'negative':
+                    x_cond[mask == 0] = -2.
                 else:
                     raise NotImplementedError
 
@@ -123,7 +125,12 @@ class Diffusion(object):
                     low=0, high=self.num_timesteps, size=(n // 2 + 1,)
                 ).to(self.device)
                 t = torch.cat([t, self.num_timesteps - t - 1], dim=0)[:n]
-                loss = loss_registry[config.model.type](model, x, x_cond, t, e, b)
+
+                if self.config.model.in_mask_channel:
+                    mask = data_transform(self.config, mask.float())
+                    loss = loss_registry[config.model.type](model, x, x_cond, t, e, b, mask)
+                else:
+                    loss = loss_registry[config.model.type](model, x, x_cond, t, e, b)
 
                 tb_logger.add_scalar("loss", loss, global_step=step)
 

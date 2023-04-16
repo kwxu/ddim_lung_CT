@@ -298,10 +298,12 @@ class Model(nn.Module):
                                         stride=1,
                                         padding=1)
 
-    def forward(self, x, t, x_cond=None):
+    def forward(self, x, t, x_cond=None, mask=None):
         assert x.shape[2] == x.shape[3] == self.resolution
         if x_cond is not None:
             assert x.shape[2] == x_cond.shape[2] == x_cond.shape[3]
+        if mask is not None:
+            assert x.shape[2] == mask.shape[2]
 
         # timestep embedding
         temb = get_timestep_embedding(t, self.ch)
@@ -312,6 +314,10 @@ class Model(nn.Module):
         # Concatenate the conditional image when it presents
         if x_cond is not None:
             x = torch.cat([x, x_cond], dim=1)
+
+        # Concatenate when the mask image is presented
+        if mask is not None:
+            x = torch.cat([x, mask], dim=1)
 
         # downsampling
         hs = [self.conv_in(x)]
