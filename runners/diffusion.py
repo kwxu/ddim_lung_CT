@@ -120,6 +120,19 @@ class Diffusion(object):
                 else:
                     raise NotImplementedError
 
+                # if self.config.model.class_free_guidance:
+                #     dropout_mask = torch.bernoulli(
+                #         torch.zeros(x_cond.shape[0]) +
+                #         self.config.model.class_free_guidance_dropout_rate).to(self.device)
+                #     dropout_mask = dropout_mask[:, None, None, None]
+                #     dropout_mask = dropout_mask.repeat(
+                #         1,
+                #         self.config.data.channels,
+                #         self.config.lung_ct_config.image_size,
+                #         self.config.lung_ct_config.image_size)
+                #     dropout_mask = 1 - dropout_mask
+                #     x_cond = x_cond * dropout_mask
+
                 # antithetic sampling
                 t = torch.randint(
                     low=0, high=self.num_timesteps, size=(n // 2 + 1,)
