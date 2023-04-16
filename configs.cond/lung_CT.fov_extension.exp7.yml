@@ -1,0 +1,81 @@
+data:
+    dataset: "lung_CT"
+    category: ""
+    image_size: 256
+    channels: 1
+    logit_transform: false
+    uniform_dequantization: false
+    gaussian_dequantization: false
+    random_flip: true
+    rescaled: true
+    num_workers: 15
+
+lung_ct_config:
+    data_dir: "/local_ssd1/xuk9/Projects/ChestExtrapolation/Data/v3"
+    dataset: "vlsp"
+    clip_range: [-1000, 600]
+    scale_range: [0, 1]
+    inter_order: 1
+    image_size: 256
+    channels: 1
+    augmentation:
+        padding_ratio: [1.05, 1.5]
+        rotation_degree: 15
+        trans_ratio_x: 0.1
+        trans_ratio_y: 0.2
+        gaussian_smooth_p: 0.3
+        gaussian_smooth_sigma: 1
+        mask:
+            square:
+                dimension_range: [0.6, 0.9]
+            round:
+                random_apply_p: 0.5
+                apply_dominance_p: 0.6
+                dimension_range: [1.1, 1.5]
+                offset_max_ratio_range: 1
+
+model:
+    type: "simple"
+    in_channels: 2
+    out_ch: 1
+    ch: 128
+    ch_mult: [1, 1, 2, 2, 4, 4]
+    num_res_blocks: 2
+    attn_resolutions: [16, ]
+    dropout: 0.0
+    var_type: fixedsmall
+    ema_rate: 0.999
+    ema: True
+    resamp_with_conv: True
+    invalid_region_val: 'zero'
+    in_mask_channel: False
+    class_free_guidance: False
+    class_free_guidance_dropout_rate: 0.1
+    loss_type: 'l2'
+    restricted_loss_region: True
+
+diffusion:
+    beta_schedule: linear
+    beta_start: 0.0001
+    beta_end: 0.02
+    num_diffusion_timesteps: 1000
+
+training:
+    batch_size: 14
+    n_epochs: 10000
+    n_iters: 5000000
+    snapshot_freq: 5000
+    validation_freq: 2000
+
+sampling:
+    batch_size: 1
+    last_only: True
+    total_n_sample: 100
+
+optim:
+    weight_decay: 0.000
+    optimizer: "Adam"
+    lr: 0.00001
+    beta1: 0.9
+    amsgrad: false
+    eps: 0.00000001

@@ -141,9 +141,17 @@ class Diffusion(object):
 
                 if self.config.model.in_mask_channel:
                     mask = data_transform(self.config, mask.float())
-                    loss = loss_registry[config.model.type](model, x, x_cond, t, e, b, mask)
+                    loss = loss_registry[config.model.type](
+                        model, x, x_cond, t, e, b, mask,
+                        loss_type=config.model.loss_type,
+                        restricted_loss_region=config.model.restricted_loss_region
+                    )
                 else:
-                    loss = loss_registry[config.model.type](model, x, x_cond, t, e, b)
+                    loss = loss_registry[config.model.type](
+                        model, x, x_cond, t, e, b,
+                        loss_type=config.model.loss_type,
+                        restricted_loss_region=config.model.restricted_loss_region
+                    )
 
                 tb_logger.add_scalar("loss", loss, global_step=step)
 
