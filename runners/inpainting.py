@@ -4,6 +4,7 @@ import torch
 from runners.runner_utils import get_beta_schedule
 from models.diffusion import Model
 from functions.denoising import generalized_repaint_steps, conditional_inpainting_steps
+from datasets import data_transform
 
 
 class InpaintingSampleUtils:
@@ -54,26 +55,31 @@ class InpaintingSampleUtils:
         seq = range(0, self.num_timesteps, step_skip)
         x = torch.randn_like(x0_gt)
 
-        # xs, _ = generalized_repaint_steps(
-        #     x.to(self.device),
-        #     x0_gt.to(self.device),
-        #     mask_gt.to(self.device),
-        #     seq,
-        #     self.model,
-        #     self.betas,
-        #     n_resample,
-        #     eta=0.0
-        # )
-        xs, _ = conditional_inpainting_steps(
-            x.to(self.device),
-            x0_gt.to(self.device),
-            mask_gt.to(self.device),
-            seq,
-            self.model,
-            self.betas,
-            self.config.model.invalid_region_val,
-            eta=0.0
-        )
+        if self.config.model.in_mask_channel:
+            mask_transformed = data_transform(self.config, mask_gt.float())
+            xs, _ = conditional_inpainting_steps(
+                x.to(self.device),
+                x0_gt.to(self.device),
+                mask_gt.to(self.device),
+                seq,
+                self.model,
+                self.betas,
+                self.config.model.invalid_region_val,
+                if_in_mask_channel=True,
+                mask_transformed=mask_transformed,
+                eta=0.0
+            )
+        else:
+            xs, _ = conditional_inpainting_steps(
+                x.to(self.device),
+                x0_gt.to(self.device),
+                mask_gt.to(self.device),
+                seq,
+                self.model,
+                self.betas,
+                self.config.model.invalid_region_val,
+                eta=0.0
+            )
 
         x0_pred = xs[-1].cpu().numpy()
 

@@ -78,7 +78,9 @@ def generalized_repaint_steps(x, x0_gt, mask, seq, model, b, n_resample, **kwarg
         return xs, x0_preds
 
 
-def conditional_inpainting_steps(x, x0_gt, mask, seq, model, b, invalid_region_val_type, **kwargs):
+def conditional_inpainting_steps(x, x0_gt, mask, seq, model, b, invalid_region_val_type,
+                                 if_in_mask_channel=False, mask_transformed=None,
+                                 **kwargs):
     with torch.no_grad():
         n = x.size(0)
         seq_next = [-1] + list(seq[:-1])
@@ -103,7 +105,11 @@ def conditional_inpainting_steps(x, x0_gt, mask, seq, model, b, invalid_region_v
             else:
                 raise NotImplementedError
 
-            et = model(xt, t, x_cond)
+            if if_in_mask_channel:
+                et = model(xt, t, x_cond, mask_transformed)
+            else:
+                et = model(xt, t, x_cond)
+
             x0_t = (xt - et * (1 - at).sqrt()) / at.sqrt()
             x0_preds.append(x0_t.to('cpu'))
             c1 = (
